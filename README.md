@@ -2,18 +2,18 @@
 
 🎵 自动获取网易云音乐歌词，同步显示到 HALO OIXELBAR 音箱上！
 
-> 💡 **新方案**：使用内存读取技术，无需API，直接从网易云音乐进程中获取歌词
+> 💡 **核心技术**：内存读取 + HID协议，与官方工具HaloPixelToolBox完全一致
 
 ## ✨ 功能特点
 
 - 🎵 **内存读取** - 直接从网易云音乐进程中读取歌词，无需API
+- 🔌 **HID协议通信** - 使用与官方HaloPixelToolBox相同的HID协议
 - 📜 **LRC歌词解析** - 支持标准LRC格式歌词
-- 🔌 **USB通信** - 与HALO OIXELBAR音箱通过USB连接通信
 - ⚡ **实时同步** - 50ms级歌词同步显示
 - 🪟 **Windows优化** - 专为Windows系统设计
 - ⚙️ **多版本支持** - 支持网易云音乐多个版本
-- 💾 **本地缓存** - 歌词缓存，减少重复读取
-- 🔍 **自动检测** - 自动识别歌曲切换和播放状态
+- 🎨 **多种布局** - 支持左对齐、居中、右对齐、滚动等
+- 🖼️ **UI模式切换** - 支持时钟、游戏、工作等多种UI模式
 
 ## 📋 系统要求
 
@@ -21,6 +21,7 @@
 - **Python**: 3.8 或更高版本
 - **网易云音乐**: 3.1.25 - 3.1.30 版本
 - **硬件**: HALO OIXELBAR 音箱 + USB数据线
+- **权限**: 管理员权限（用于HID通信和内存读取）
 
 ## 🚀 快速开始
 
@@ -40,7 +41,7 @@ cd HaloLrcSync
 # 安装依赖
 pip install -r requirements.txt
 
-# 运行程序
+# 以管理员身份运行
 python src/main.py
 ```
 
@@ -48,10 +49,11 @@ python src/main.py
 
 ### 前提条件
 
-1. **打开网易云音乐**
-2. **播放任意歌曲**
-3. **开启桌面歌词功能**（重要！）
-4. **运行本程序**
+1. **以管理员身份运行**（重要！）
+2. **打开网易云音乐**
+3. **播放任意歌曲**
+4. **开启桌面歌词功能**（重要！）
+5. **连接HALO OIXELBAR音箱**
 
 ### 基本命令
 
@@ -62,14 +64,11 @@ python src/main.py
 # 检查状态
 python src/main.py --status
 
-# 列出USB设备
+# 列出HID设备
 python src/main.py --list-devices
-
-# 指定串口设备
-python src/main.py --port COM3
 ```
 
-## 🛠️ 工作原理
+## 🛠️ 技术架构
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -88,9 +87,17 @@ python src/main.py --port COM3
 ┌─────────────────────────────────────────────────────────┐
 │              HaloLrcSync (本软件)                       │
 │  ┌──────────────────┐    ┌──────────────────────────┐  │
-│  │ cloudmusic_reader│───▶│   USB 发送到音箱          │  │
-│  │   内存读取器     │    │   显示歌词               │  │
+│  │ cloudmusic_reader│───▶│   HID发送到音箱          │  │
+│  │   内存读取器     │    │   协议包构建器           │  │
 │  └──────────────────┘    └──────────────────────────┘  │
+└─────────────────────────────────────────────────────────┘
+                          │
+                          │ HID Write (64字节包)
+                          ▼
+┌─────────────────────────────────────────────────────────┐
+│              HALO OIXELBAR 音箱                         │
+│  - 文本显示 (左对齐/居中/右对齐/滚动)                     │
+│  - UI模式 (时钟/游戏/工作/阅读等)                        │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -99,18 +106,55 @@ python src/main.py --port COM3
 ```
 HaloLrcSync/
 ├── src/
-│   ├── __init__.py           # 包信息
-│   ├── main.py               # 主程序入口
-│   ├── config.py             # 配置管理
-│   ├── cloudmusic_reader.py  # 内存读取器 ⭐核心
-│   ├── lrc_parser.py         # 歌词解析器
-│   └── usb_comm.py           # USB通信模块
+│   ├── __init__.py              # 包信息
+│   ├── main.py                  # 主程序入口
+│   ├── config.py                # 配置管理
+│   ├── cloudmusic_reader.py     # 内存读取器
+│   ├── hid_packet_builder.py    # HID协议包构建器 ⭐核心
+│   ├── lrc_parser.py            # 歌词解析器
+│   └── usb_comm.py              # HID通信模块 ⭐核心
 ├── docs/
-│   └── usb_protocol.md       # USB协议说明
-├── requirements.txt          # 依赖列表
-├── run.bat                   # Windows启动脚本
+│   ├── address_guide.md         # 地址查找指南
+│   └── address_scanner.py       # 辅助扫描脚本
+├── requirements.txt             # 依赖列表
+├── run.bat                      # Windows启动脚本
 └── README.md
 ```
+
+## 🔧 HID协议说明
+
+### 协议格式
+
+| 类型 | 包长度 | 说明 |
+|------|--------|------|
+| 文本包 | 64字节 | 显示文本内容 |
+| 布局包 | 64字节 | 设置文本布局 |
+| UI模式包 | 64字节 | 切换UI显示模式 |
+
+### 支持的布局
+
+| 布局 | 说明 |
+|------|------|
+| LEFT | 左对齐 |
+| CENTER | 居中 |
+| RIGHT | 右对齐 |
+| STRETCH | 拉伸 |
+| SCROLL_LEFT_TO_RIGHT | 从左向右滚动 |
+| SCROLL_RIGHT_TO_LEFT | 从右向左滚动 |
+
+### 支持的UI模式
+
+| 模式 | 说明 |
+|------|------|
+| CLOCK | 时钟 |
+| GAME | 游戏 |
+| WORK | 工作 |
+| READ | 阅读 |
+| CATS | 猫咪 |
+| DOGS | 狗狗 |
+| MEMES | 表情 |
+| CYBER | 赛博 |
+| WAVES | 波浪 |
 
 ## 🔧 支持的网易云音乐版本
 
@@ -123,8 +167,6 @@ HaloLrcSync/
 | 3.1.26 | ✅ 支持 |
 | 3.1.25 | ✅ 支持 |
 
-> 📝 如果您的版本不在列表中，程序会尝试使用默认偏移，可能需要手动更新地址
-
 ## ⚙️ 配置说明
 
 配置文件位于：`C:\Users\你的用户名\.halo_lrc_sync\config.json`
@@ -136,71 +178,40 @@ HaloLrcSync/
     "display_duration": 3,
     "max_chars_per_line": 20
   },
-  "usb": {
-    "device_id": "",
-    "baud_rate": 9600,
-    "auto_detect": true
+  "hid": {
+    "auto_detect": true,
+    "device_keywords": ["halo", "pixel"]
   }
 }
 ```
 
 ## ❓ 常见问题
 
-### Q: 提示"网易云音乐未运行"？
+### Q: 提示权限不足？
 
-A: 请确保：
-1. 网易云音乐已安装并运行
-2. 网易云音乐开启了桌面歌词功能
-3. 播放了一首歌曲
+A: HID设备通信需要管理员权限
+- 右键点击命令提示符
+- 选择"以管理员身份运行"
+- 然后执行程序
+
+### Q: 找不到HID设备？
+
+A: 检查以下几点：
+1. 设备已通过USB连接
+2. 以管理员身份运行
+3. 设备名称包含 "Halo" 或 "PixelBar"
 
 ### Q: 歌词读取不到？
 
 A: 检查以下几点：
 1. 网易云音乐版本是否在支持列表中
 2. 是否开启了桌面歌词功能
-3. 程序是否以管理员权限运行（部分系统需要）
-
-### Q: 如何开启桌面歌词？
-
-A: 在网易云音乐中：
-- 右键歌曲播放界面
-- 选择"桌面歌词"选项
-
-### Q: 程序需要管理员权限吗？
-
-A: 内存读取需要足够的进程访问权限。如果遇到权限问题，请尝试以管理员身份运行。
-
-## 🔧 开发说明
-
-### 内存地址更新
-
-如果网易云音乐更新后地址变化，可以更新 `cloudmusic_reader.py` 中的 `VERSION_ADDRESS_MAP`：
-
-```python
-VERSION_ADDRESS_MAP = {
-    "3.1.31": (0x新的基地址, 偏移1, 偏移2, ...),
-}
-```
-
-### 添加新版本支持
-
-参考以下资源获取最新的内存地址：
-
-- [地址查找指南](docs/address_guide.md) - 详细的步骤说明
-- [HaloPixelToolBox](https://github.com/XFEstudio/HaloPixelToolBox) - 项目会持续更新地址
-- [地址扫描脚本](docs/address_scanner.py) - 辅助工具
-
-### 地址更新步骤
-
-1. 网易云音乐发布新版本
-2. 使用 Cheat Engine 查找新地址（见 `docs/address_guide.md`）
-3. 更新 `src/cloudmusic_reader.py` 中的 `VERSION_ADDRESS_MAP`
-4. 提交 PR 到本项目
+3. 程序是否以管理员权限运行
 
 ## 📚 参考项目
 
-- [HaloPixelToolBox](https://github.com/XFEstudio/HaloPixelToolBox) - C# 实现的歌词同步工具
-- [NeteaseCloudMusicApi](https://github.com/Binaryify/NeteaseCloudMusicApi) - 网易云音乐API
+- [HaloPixelToolBox](https://github.com/XFEstudio/HaloPixelToolBox) - C# 实现的歌词同步工具（本项目核心参考）
+- [hidapi](https://github.com/libusb/hidapi) - HID设备通信库
 
 ## 🤝 贡献
 

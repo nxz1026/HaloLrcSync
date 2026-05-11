@@ -4,7 +4,8 @@
 HALO OIXELBAR 歌词同步主程序
 直接从网易云音乐进程中读取歌词，无需API
 
-参考项目：HaloPixelToolBox (https://github.com/XFEstudio/HaloPixelToolBox)
+参考项目：
+- HaloPixelToolBox (https://github.com/XFEstudio/HaloPixelToolBox)
 """
 
 import sys
@@ -19,23 +20,25 @@ sys.path.insert(0, str(project_root))
 from src.config import get_config
 from src.cloudmusic_reader import CloudMusicMemoryReader, find_cloudmusic_version, get_supported_versions
 from src.lrc_parser import parse_lrc
-from src.usb_comm import get_usb_communicator
+from src.usb_comm import get_hid_communicator, HaloPixelCommunicator
+from src.hid_packet_builder import TextLayout, UIModel
 
 
 class LyricSynchronizer:
-    """歌词同步器 - 使用内存读取方式"""
+    """歌词同步器 - 使用内存读取方式 + HID通信"""
     
     def __init__(self):
         """初始化"""
         self.config = get_config()
         self.reader = CloudMusicMemoryReader()
-        self.usb = get_usb_communicator()
+        self.hid = get_hid_communicator()
         self.running = False
         self.current_song_id = None
         self.current_lyric = None
         self.current_position_ms = 0
         self.last_lyric_index = -1
         self.last_lyrics_text = ""
+        self.scroll_mode = False
         self._lock = threading.Lock()
     
     def start(self):
@@ -52,11 +55,10 @@ class LyricSynchronizer:
         if not self.reader.initialize():
             print("[Sync] 网易云音乐未运行或版本不支持")
             print(f"[Sync] 支持的版本: {', '.join(get_supported_versions())}")
-            return
         
-        # 连接USB设备
-        if not self.usb.connect():
-            print("[Sync] USB设备连接失败，使用模拟模式")
+        # 连接HID设备
+        if not self.hid.connect():
+            print("[Sync] HID设备连接失败，使用模拟模式")
         
         # 启动主循环线程
         sync_thread = threading.Thread(target=self._sync_loop, daemon=True)
@@ -70,8 +72,8 @@ class LyricSynchronizer:
         """停止同步器"""
         print("[Sync] 正在停止...")
         self.running = False
-        self.usb.clear_display()
-        self.usb.disconnect()
+        self.hid.clear_display()
+        self.hid.disconnect()
         print("[Sync] 已停止")
     
     def _handle_interrupt(self, signum, frame):
@@ -83,6 +85,7 @@ class LyricSynchronizer:
     def _sync_loop(self):
         """主同步循环"""
         show_startup = True
+        no_lyrics_count = 0
         
         while self.running:
             try:
@@ -90,7 +93,6 @@ class LyricSynchronizer:
                 if not self.reader.is_ready():
                     print("[Sync] 网易云音乐已关闭，等待重新启动...")
                     time.sleep(2)
-                    # 尝试重新初始化
                     if self.reader.initialize():
                         print("[Sync] 网易云音乐已重新连接")
                         show_startup = True
@@ -101,8 +103,8 @@ class LyricSynchronizer:
                 
                 if lyrics and lyrics != self.last_lyrics_text:
                     self.last_lyrics_text = lyrics
+                    no_lyrics_count = 0
                     
-                    # 显示启动信息
                     if show_startup:
                         print(f"\n{'='*60}")
                         print("[Sync] 网易云歌词同步已启动!")
@@ -110,8 +112,13 @@ class LyricSynchronizer:
                         print(f"{'='*60}\n")
                         show_startup = False
                     
-                    # 解析歌词（如果包含时间戳）
                     self._process_lyrics(lyrics)
+                else:
+                    no_lyrics_count += 1
+                    # 连续30秒无歌词变化，切换到时钟UI
+                    if no_lyrics_count > 600:  # 30秒 * 20次
+                        self._switch_to_clock_ui()
+                        no_lyrics_count = 0
                 
                 time.sleep(0.05)  # 50ms刷新间隔
                 
@@ -128,11 +135,9 @@ class LyricSynchronizer:
         """
         # 检查是否包含时间戳（[mm:ss.xx] 格式）
         if '[' in lyrics and ']' in lyrics:
-            # 尝试解析LRC格式
             try:
                 parser = parse_lrc(lyrics)
                 if len(parser) > 0:
-                    # 取当前行
                     current_line = parser[0]
                     self._display_lyric(current_line.text, current_line.index, len(parser))
                     return
@@ -156,35 +161,53 @@ class LyricSynchronizer:
         
         print(f"[Lyric] {text}")
         
-        # 发送到USB设备
-        success = self.usb.send_lyric_line(
-            text=text,
-            line_index=line_index,
-            total_lines=total_lines
-        )
+        # 截断过长的文本
+        max_chars = self.config.get('lyrics', 'max_chars_per_line', fallback=20)
+        text = text[:max_chars]
+        
+        # 根据文本长度决定布局
+        if len(text) > 15:
+            # 长文本使用滚动模式
+            if not self.scroll_mode:
+                self.hid.set_text_layout(TextLayout.SCROLL_RIGHT_TO_LEFT)
+                self.scroll_mode = True
+                time.sleep(0.3)
+        else:
+            # 短文本使用居中模式
+            if self.scroll_mode:
+                self.hid.set_text_layout(TextLayout.CENTER)
+                self.scroll_mode = False
+                time.sleep(0.1)
+        
+        # 发送到HID设备
+        success = self.hid.send_lyric_line(text, line_index, total_lines)
         
         if not success:
             print("[Sync] 歌词发送失败")
     
+    def _switch_to_clock_ui(self):
+        """切换到时钟UI模式"""
+        try:
+            self.hid.set_ui_mode(UIModel.CLOCK)
+            self.hid.set_text_layout(TextLayout.CENTER)
+            self.scroll_mode = False
+            print("[Sync] 切换到时钟UI模式")
+        except Exception as e:
+            print(f"[Sync] 切换UI模式失败: {e}")
+    
     def _clear_display(self):
         """清空显示"""
-        self.usb.clear_display()
+        self.hid.clear_display()
         self.current_lyric = None
         self.last_lyrics_text = ""
 
 
 def list_devices():
-    """列出所有USB设备"""
-    print("可用的串口设备:")
-    devices = get_usb_communicator().list_devices()
-    
-    if not devices:
-        print("  未找到设备")
-        return
-    
-    for i, device in enumerate(devices, 1):
-        print(f"  {i}. {device.port} - {device.description}")
-        print(f"     HWID: {device.hwid}")
+    """列出所有HID设备"""
+    print("=" * 60)
+    print("HID设备列表")
+    print("=" * 60)
+    HaloPixelCommunicator.print_all_devices()
 
 
 def check_status():
@@ -223,7 +246,7 @@ def main():
     """主函数"""
     print("=" * 60)
     print("HALO OIXELBAR 歌词同步器")
-    print("(内存读取模式 - 无需API)")
+    print("(内存读取 + HID协议)")
     print("=" * 60)
     
     import argparse
@@ -235,18 +258,18 @@ def main():
 示例:
   python src/main.py              # 启动同步器
   python src/main.py --status     # 检查状态
-  python src/main.py --list-devices  # 列出USB设备
-  python src/main.py --port COM3  # 指定串口设备
+  python src/main.py --list-devices  # 列出HID设备
 
 前提条件:
   1. 网易云音乐已安装并运行
   2. 网易云音乐开启了桌面歌词功能
   3. 电脑已连接 HALO OIXELBAR 音箱
+  4. 以管理员权限运行（Windows)
         """
     )
-    parser.add_argument("--list-devices", action="store_true", help="列出可用的串口设备")
+    parser.add_argument("--list-devices", action="store_true", help="列出可用的HID设备")
     parser.add_argument("--status", action="store_true", help="检查网易云音乐状态")
-    parser.add_argument("--port", type=str, help="指定串口设备")
+    parser.add_argument("--port", type=str, help="指定设备路径")
     parser.add_argument("--config", type=str, help="配置文件路径")
     
     args = parser.parse_args()
@@ -266,10 +289,10 @@ def main():
     # 创建并启动同步器
     synchronizer = LyricSynchronizer()
     
-    # 如果指定了端口
+    # 如果指定了设备路径
     if args.port:
-        print(f"[Main] 使用指定端口: {args.port}")
-        get_usb_communicator().connect(args.port)
+        print(f"[Main] 使用指定设备: {args.port}")
+        synchronizer.hid.connect(args.port)
     
     try:
         synchronizer.start()
