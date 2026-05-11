@@ -1,6 +1,6 @@
-# HALO OIXELBAR 歌词同步器
+# HALO PIXELBAR 歌词同步器
 
-通过内存读取方式获取网易云音乐歌词，同步显示到 HALO OIXELBAR 音箱。
+通过内存读取方式获取网易云音乐歌词，同步显示到 HALO PIXELBAR 音箱。
 
 > 核心技术：内存读取 + HID协议，与工具 HaloPixelToolBox 完全一致
 
