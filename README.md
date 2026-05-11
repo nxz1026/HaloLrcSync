@@ -184,7 +184,18 @@ VERSION_ADDRESS_MAP = {
 
 ### 添加新版本支持
 
-参考 [HaloPixelToolBox](https://github.com/XFEstudio/HaloPixelToolBox) 项目获取最新的内存地址。
+参考以下资源获取最新的内存地址：
+
+- [地址查找指南](docs/address_guide.md) - 详细的步骤说明
+- [HaloPixelToolBox](https://github.com/XFEstudio/HaloPixelToolBox) - 项目会持续更新地址
+- [地址扫描脚本](docs/address_scanner.py) - 辅助工具
+
+### 地址更新步骤
+
+1. 网易云音乐发布新版本
+2. 使用 Cheat Engine 查找新地址（见 `docs/address_guide.md`）
+3. 更新 `src/cloudmusic_reader.py` 中的 `VERSION_ADDRESS_MAP`
+4. 提交 PR 到本项目
 
 ## 📚 参考项目
 
