@@ -18,9 +18,9 @@ project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.config import get_config
-from src.cloudmusic_reader import CloudMusicMemoryReader, find_cloudmusic_version, get_supported_versions
-from src.lrc_parser import parse_lrc
-from src.usb_comm import get_hid_communicator, HaloPixelCommunicator
+from src.memory_reader import CloudMusicMemoryReader, find_cloudmusic_version, get_supported_versions
+from src.lyrics_parser import parse_lrc
+from src.hid_comm import get_hid_communicator, HaloPixelCommunicator
 from src.hid_packet_builder import TextLayout, UIModel
 
 

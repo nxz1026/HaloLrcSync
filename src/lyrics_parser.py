@@ -27,8 +27,8 @@ class LyricLine:
         return f"{minutes:02d}:{seconds:05.2f}"
 
 
-class LrcParser:
-    """LRC歌词解析器"""
+class LyricsParser:
+    """歌词解析器"""
     
     # LRC时间戳正则表达式 [mm:ss.xx] 或 [mm:ss:xx]
     TIME_PATTERN = re.compile(r'\[(\d{1,2}):(\d{1,2})(?:[.:](\d{1,3}))?\]')
@@ -41,7 +41,7 @@ class LrcParser:
         self.tags: Dict[str, str] = {}
         self.content: str = ""
     
-    def parse(self, lrc_content: str) -> 'LrcParser':
+    def parse(self, lrc_content: str) -> 'LyricsParser':
         """
         解析LRC歌词内容
         
@@ -217,7 +217,7 @@ class LrcParser:
         return "\n".join(result)
 
 
-def parse_lrc(lrc_content: str) -> LrcParser:
+def parse_lrc(lrc_content: str) -> LyricsParser:
     """
     便捷函数 - 解析LRC歌词
     
@@ -227,4 +227,4 @@ def parse_lrc(lrc_content: str) -> LrcParser:
     Returns:
         解析器对象
     """
-    return LrcParser().parse(lrc_content)
+    return LyricsParser().parse(lrc_content)
