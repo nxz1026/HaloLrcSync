@@ -2,8 +2,9 @@
 # -*- coding: utf-8 -*-
 """
 HALO OIXELBAR 歌词同步主程序
-自动获取网易云音乐歌词并同步显示到音箱
-支持自动启动 NeteaseCloudMusicApi
+直接从网易云音乐进程中读取歌词，无需API
+
+参考项目：HaloPixelToolBox (https://github.com/XFEstudio/HaloPixelToolBox)
 """
 
 import sys
@@ -16,35 +17,29 @@ project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.config import get_config
-from src.netease_api import get_netease_api
+from src.cloudmusic_reader import CloudMusicMemoryReader, find_cloudmusic_version, get_supported_versions
 from src.lrc_parser import parse_lrc
 from src.usb_comm import get_usb_communicator
 
 
 class LyricSynchronizer:
-    """歌词同步器"""
+    """歌词同步器 - 使用内存读取方式"""
     
     def __init__(self):
         """初始化"""
         self.config = get_config()
-        self.netease = get_netease_api()
+        self.reader = CloudMusicMemoryReader()
         self.usb = get_usb_communicator()
         self.running = False
         self.current_song_id = None
         self.current_lyric = None
         self.current_position_ms = 0
         self.last_lyric_index = -1
-        self.song_start_time = 0
+        self.last_lyrics_text = ""
         self._lock = threading.Lock()
-        self._api_server = None
     
-    def start(self, auto_start_api: bool = True):
-        """
-        启动同步器
-        
-        Args:
-            auto_start_api: 是否自动启动 NeteaseCloudMusicApi
-        """
+    def start(self):
+        """启动同步器"""
         if self.running:
             print("[Sync] 已在运行中")
             return
@@ -52,37 +47,24 @@ class LyricSynchronizer:
         self.running = True
         print("[Sync] 开始歌词同步...")
         
-        if auto_start_api:
-            self._start_api_server()
+        # 初始化网易云音乐内存读取器
+        print("[Sync] 初始化网易云音乐内存读取器...")
+        if not self.reader.initialize():
+            print("[Sync] 网易云音乐未运行或版本不支持")
+            print(f"[Sync] 支持的版本: {', '.join(get_supported_versions())}")
+            return
         
+        # 连接USB设备
         if not self.usb.connect():
             print("[Sync] USB设备连接失败，使用模拟模式")
         
+        # 启动主循环线程
         sync_thread = threading.Thread(target=self._sync_loop, daemon=True)
         sync_thread.start()
         
+        # 注册信号处理
         signal.signal(signal.SIGINT, self._handle_interrupt)
         signal.signal(signal.SIGTERM, self._handle_interrupt)
-    
-    def _start_api_server(self):
-        """启动 NeteaseCloudMusicApi 服务器"""
-        try:
-            from src.api_server import get_api_server
-            self._api_server = get_api_server()
-            
-            if not self._api_server.is_server_running():
-                print("[Sync] 正在启动 NeteaseCloudMusicApi...")
-                if self._api_server.start():
-                    print("[Sync] API 服务器启动成功")
-                else:
-                    print("[Sync] API 服务器启动失败，请手动启动或检查 Node.js 是否安装")
-            else:
-                print("[Sync] API 服务器已在运行")
-                
-        except ImportError:
-            print("[Sync] 未找到 api_server 模块，跳过自动启动")
-        except Exception as e:
-            print(f"[Sync] API 服务器启动异常: {e}")
     
     def stop(self):
         """停止同步器"""
@@ -90,10 +72,6 @@ class LyricSynchronizer:
         self.running = False
         self.usb.clear_display()
         self.usb.disconnect()
-        
-        if self._api_server:
-            self._api_server.stop()
-        
         print("[Sync] 已停止")
     
     def _handle_interrupt(self, signum, frame):
@@ -104,83 +82,85 @@ class LyricSynchronizer:
     
     def _sync_loop(self):
         """主同步循环"""
+        show_startup = True
+        
         while self.running:
             try:
-                status = self.netease.get_current_play_status()
-                
-                if not status:
-                    time.sleep(1)
+                # 检查网易云音乐是否还在运行
+                if not self.reader.is_ready():
+                    print("[Sync] 网易云音乐已关闭，等待重新启动...")
+                    time.sleep(2)
+                    # 尝试重新初始化
+                    if self.reader.initialize():
+                        print("[Sync] 网易云音乐已重新连接")
+                        show_startup = True
                     continue
                 
-                if status["song_id"] != self.current_song_id:
-                    if status["song_id"]:
-                        self._load_new_song(status)
-                    else:
-                        self._clear_display()
-                    time.sleep(0.5)
-                    continue
+                # 读取歌词
+                lyrics = self.reader.read_lyrics()
                 
-                if not status["playing"]:
-                    time.sleep(0.5)
-                    continue
+                if lyrics and lyrics != self.last_lyrics_text:
+                    self.last_lyrics_text = lyrics
+                    
+                    # 显示启动信息
+                    if show_startup:
+                        print(f"\n{'='*60}")
+                        print("[Sync] 网易云歌词同步已启动!")
+                        print(f"[Sync] 版本: {self.reader.version}")
+                        print(f"{'='*60}\n")
+                        show_startup = False
+                    
+                    # 解析歌词（如果包含时间戳）
+                    self._process_lyrics(lyrics)
                 
-                self._sync_lyrics(status)
+                time.sleep(0.05)  # 50ms刷新间隔
                 
             except Exception as e:
                 print(f"[Sync] 同步错误: {e}")
                 time.sleep(1)
     
-    def _load_new_song(self, status: dict):
-        """加载新歌曲"""
-        with self._lock:
-            song_id = status["song_id"]
-            song_name = status.get("song_name", "")
-            artist = status.get("artist", "")
-            
-            print(f"[Sync] 新歌曲: {song_name} - {artist}")
-            
-            lrc_text = self.netease.get_lyrics(song_id)
-            if lrc_text:
-                self.current_lyric = parse_lrc(lrc_text)
-                print(f"[Sync] 歌词加载成功，共 {len(self.current_lyric)} 行")
-            else:
-                self.current_lyric = None
-                print("[Sync] 无法获取歌词")
-            
-            self.current_song_id = song_id
-            self.last_lyric_index = -1
-            self.current_position_ms = 0
-            self.song_start_time = time.time() * 1000 - status.get("position_ms", 0)
-            
-            self.usb.show_song_info(song_name, artist)
-            time.sleep(2)
+    def _process_lyrics(self, lyrics: str):
+        """
+        处理歌词文本
+        
+        Args:
+            lyrics: 原始歌词文本
+        """
+        # 检查是否包含时间戳（[mm:ss.xx] 格式）
+        if '[' in lyrics and ']' in lyrics:
+            # 尝试解析LRC格式
+            try:
+                parser = parse_lrc(lyrics)
+                if len(parser) > 0:
+                    # 取当前行
+                    current_line = parser[0]
+                    self._display_lyric(current_line.text, current_line.index, len(parser))
+                    return
+            except Exception:
+                pass
+        
+        # 直接显示原始歌词
+        self._display_lyric(lyrics.strip(), 0, 1)
     
-    def _sync_lyrics(self, status: dict):
-        """同步歌词显示"""
-        if not self.current_lyric:
+    def _display_lyric(self, text: str, line_index: int = 0, total_lines: int = 1):
+        """
+        显示歌词
+        
+        Args:
+            text: 歌词文本
+            line_index: 行索引
+            total_lines: 总行数
+        """
+        if not text:
             return
         
-        position_ms = status.get("position_ms", 0)
-        lyric_line = self.current_lyric.get_lyric_at_time(position_ms)
+        print(f"[Lyric] {text}")
         
-        if not lyric_line:
-            return
-        
-        if lyric_line.index != self.last_lyric_index:
-            self.last_lyric_index = lyric_line.index
-            self._display_lyric(lyric_line)
-    
-    def _display_lyric(self, lyric_line):
-        """显示歌词"""
-        if not lyric_line.text:
-            return
-        
-        print(f"[Lyric] [{lyric_line.time_to_str()}] {lyric_line.text}")
-        
+        # 发送到USB设备
         success = self.usb.send_lyric_line(
-            text=lyric_line.text,
-            line_index=lyric_line.index,
-            total_lines=len(self.current_lyric) if self.current_lyric else 1
+            text=text,
+            line_index=line_index,
+            total_lines=total_lines
         )
         
         if not success:
@@ -189,9 +169,8 @@ class LyricSynchronizer:
     def _clear_display(self):
         """清空显示"""
         self.usb.clear_display()
-        self.current_song_id = None
         self.current_lyric = None
-        self.last_lyric_index = -1
+        self.last_lyrics_text = ""
 
 
 def list_devices():
@@ -208,95 +187,65 @@ def list_devices():
         print(f"     HWID: {device.hwid}")
 
 
-def check_api_server():
-    """检查 API 服务器状态"""
-    try:
-        from src.api_server import get_api_server
-        server = get_api_server()
-        
-        print("NeteaseCloudMusicApi 状态:")
-        print(f"  - 已安装: {'是' if server.is_installed() else '否'}")
-        print(f"  - 运行中: {'是' if server.is_server_running() else '否'}")
-        
-        if not server.is_installed():
-            print("\n提示: 运行 python src/main.py --install-api 自动安装")
-        elif not server.is_server_running():
-            print("\n提示: 运行 python src/main.py --start-api 启动服务器")
-            
-    except ImportError:
-        print("[错误] 未找到 api_server 模块")
-    except Exception as e:
-        print(f"[错误] {e}")
-
-
-def install_api_server():
-    """安装 NeteaseCloudMusicApi"""
-    try:
-        from src.api_server import get_api_server
-        server = get_api_server()
-        
-        print("[提示] 开始安装 NeteaseCloudMusicApi...")
-        print("[提示] 这可能需要几分钟时间，请耐心等待...")
-        
-        if server.download_and_install():
-            print("[成功] 安装完成!")
+def check_status():
+    """检查状态"""
+    print("=" * 60)
+    print("状态检查")
+    print("=" * 60)
+    
+    # 检查网易云音乐
+    version = find_cloudmusic_version()
+    if version:
+        print(f"✅ 网易云音乐: 运行中 (版本: {version})")
+        supported = get_supported_versions()
+        if version in supported:
+            print("  └── 版本支持: ✅")
         else:
-            print("[失败] 安装失败，请检查日志")
-            
-    except ImportError:
-        print("[错误] 未找到 api_server 模块")
-    except Exception as e:
-        print(f"[错误] {e}")
-
-
-def start_api_server():
-    """启动 API 服务器"""
-    try:
-        from src.api_server import get_api_server
-        server = get_api_server()
-        
-        if server.start():
-            print("[成功] API 服务器已启动")
-            print("[提示] 服务器地址: http://localhost:3000")
-        else:
-            print("[失败] 服务器启动失败")
-            
-    except ImportError:
-        print("[错误] 未找到 api_server 模块")
-    except Exception as e:
-        print(f"[错误] {e}")
-
-
-def stop_api_server():
-    """停止 API 服务器"""
-    try:
-        from src.api_server import get_api_server
-        server = get_api_server()
-        
-        if server.stop():
-            print("[成功] API 服务器已停止")
-            
-    except ImportError:
-        print("[错误] 未找到 api_server 模块")
-    except Exception as e:
-        print(f"[错误] {e}")
+            print("  └── 版本支持: ⚠️  可能需要更新地址偏移")
+    else:
+        print("❌ 网易云音乐: 未运行")
+        print("   请确保已安装并运行网易云音乐，且开启了桌面歌词功能")
+    
+    print()
+    print("支持的网易云音乐版本:")
+    for v in get_supported_versions():
+        print(f"  - {v}")
+    
+    print()
+    print("使用方法:")
+    print("  1. 打开网易云音乐")
+    print("  2. 播放任意歌曲")
+    print("  3. 开启桌面歌词功能")
+    print("  4. 运行本程序")
 
 
 def main():
     """主函数"""
     print("=" * 60)
     print("HALO OIXELBAR 歌词同步器")
+    print("(内存读取模式 - 无需API)")
     print("=" * 60)
     
     import argparse
     
-    parser = argparse.ArgumentParser(description="HALO OIXELBAR 歌词同步器")
+    parser = argparse.ArgumentParser(
+        description="HALO OIXELBAR 歌词同步器",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+示例:
+  python src/main.py              # 启动同步器
+  python src/main.py --status     # 检查状态
+  python src/main.py --list-devices  # 列出USB设备
+  python src/main.py --port COM3  # 指定串口设备
+
+前提条件:
+  1. 网易云音乐已安装并运行
+  2. 网易云音乐开启了桌面歌词功能
+  3. 电脑已连接 HALO OIXELBAR 音箱
+        """
+    )
     parser.add_argument("--list-devices", action="store_true", help="列出可用的串口设备")
-    parser.add_argument("--check-api", action="store_true", help="检查 API 服务器状态")
-    parser.add_argument("--install-api", action="store_true", help="安装 NeteaseCloudMusicApi")
-    parser.add_argument("--start-api", action="store_true", help="启动 NeteaseCloudMusicApi")
-    parser.add_argument("--stop-api", action="store_true", help="停止 NeteaseCloudMusicApi")
-    parser.add_argument("--no-auto-api", action="store_true", help="不同步启动 API 服务器")
+    parser.add_argument("--status", action="store_true", help="检查网易云音乐状态")
     parser.add_argument("--port", type=str, help="指定串口设备")
     parser.add_argument("--config", type=str, help="配置文件路径")
     
@@ -306,35 +255,26 @@ def main():
         list_devices()
         return
     
-    if args.check_api:
-        check_api_server()
+    if args.status:
+        check_status()
         return
     
-    if args.install_api:
-        install_api_server()
-        return
-    
-    if args.start_api:
-        start_api_server()
-        return
-    
-    if args.stop_api:
-        stop_api_server()
-        return
-    
+    # 初始化
     if args.config:
         get_config(args.config)
     
+    # 创建并启动同步器
     synchronizer = LyricSynchronizer()
     
+    # 如果指定了端口
     if args.port:
         print(f"[Main] 使用指定端口: {args.port}")
         get_usb_communicator().connect(args.port)
     
     try:
-        auto_start_api = not args.no_auto_api
-        synchronizer.start(auto_start_api=auto_start_api)
+        synchronizer.start()
         
+        # 保持主线程运行
         while synchronizer.running:
             time.sleep(1)
             

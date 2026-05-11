@@ -1,25 +1,26 @@
 # HALO OIXELBAR 歌词同步软件
 
-自动获取网易云音乐歌词，同步显示到 HALO OIXELBAR 音箱上！
+🎵 自动获取网易云音乐歌词，同步显示到 HALO OIXELBAR 音箱上！
+
+> 💡 **新方案**：使用内存读取技术，无需API，直接从网易云音乐进程中获取歌词
 
 ## ✨ 功能特点
 
-- 🎵 **网易云音乐集成** - 自动获取当前播放歌曲和歌词
-- 📜 **LRC歌词解析** - 支持标准LRC格式歌词，支持时间戳解析
+- 🎵 **内存读取** - 直接从网易云音乐进程中读取歌词，无需API
+- 📜 **LRC歌词解析** - 支持标准LRC格式歌词
 - 🔌 **USB通信** - 与HALO OIXELBAR音箱通过USB连接通信
-- ⚡ **实时同步** - 毫秒级歌词同步显示
-- 🪟 **Windows优化** - 专为Windows系统设计，支持自动检测设备
-- ⚙️ **可配置** - 支持歌词显示时长、滚动速度等参数调整
-- 💾 **本地缓存** - 歌词自动缓存，减少API请求
+- ⚡ **实时同步** - 50ms级歌词同步显示
+- 🪟 **Windows优化** - 专为Windows系统设计
+- ⚙️ **多版本支持** - 支持网易云音乐多个版本
+- 💾 **本地缓存** - 歌词缓存，减少重复读取
 - 🔍 **自动检测** - 自动识别歌曲切换和播放状态
 
 ## 📋 系统要求
 
-- **操作系统**: Windows 10/11 (推荐)
+- **操作系统**: Windows 10/11
 - **Python**: 3.8 或更高版本
-- **Node.js**: 16.0 或更高版本（用于运行API服务）
+- **网易云音乐**: 3.1.25 - 3.1.30 版本
 - **硬件**: HALO OIXELBAR 音箱 + USB数据线
-- **播放器**: 网易云音乐（PC版）
 
 ## 🚀 快速开始
 
@@ -27,230 +28,168 @@
 
 1. 下载或克隆本项目
 2. 双击运行 `run.bat`
-3. 程序会自动安装 NeteaseCloudMusicApi（如果未安装）
-4. 开始使用！
+3. 开始使用！
 
 ### 方法二：手动安装
 
 ```bash
-# 1. 克隆项目
-git clone https://github.com/yourusername/HaloLrcSync.git
+# 克隆项目
+git clone https://github.com/nxz1026/HaloLrcSync.git
 cd HaloLrcSync
 
-# 2. 创建虚拟环境（推荐）
-python -m venv .venv
-# Windows激活
-.venv\Scripts\activate
-
-# 3. 安装依赖
+# 安装依赖
 pip install -r requirements.txt
 
-# 4. 运行程序（会自动安装 NeteaseCloudMusicApi）
+# 运行程序
 python src/main.py
 ```
 
 ## 📖 使用说明
 
-### 快速启动（推荐）
+### 前提条件
+
+1. **打开网易云音乐**
+2. **播放任意歌曲**
+3. **开启桌面歌词功能**（重要！）
+4. **运行本程序**
+
+### 基本命令
 
 ```bash
-# 一键启动（自动安装并运行API服务）
+# 启动歌词同步
 python src/main.py
-```
 
-### 管理 NeteaseCloudMusicApi
+# 检查状态
+python src/main.py --status
 
-```bash
-# 检查 API 服务器状态
-python src/main.py --check-api
-
-# 安装 NeteaseCloudMusicApi
-python src/main.py --install-api
-
-# 单独启动 API 服务器
-python src/main.py --start-api
-
-# 启动同步器但不同步启动 API
-python src/main.py --no-auto-api
-```
-
-### 其他选项
-
-```bash
-# 列出可用的串口设备
+# 列出USB设备
 python src/main.py --list-devices
 
-# 指定设备端口
+# 指定串口设备
 python src/main.py --port COM3
-
-# 指定配置文件
-python src/main.py --config my_config.json
 ```
 
-## 📦 NeteaseCloudMusicApi 集成说明
-
-本项目**内置**了 NeteaseCloudMusicApi 管理功能，可以自动：
-
-### 1. 自动安装
-
-首次运行时，程序会自动下载并安装 NeteaseCloudMusicApi：
+## 🛠️ 工作原理
 
 ```
-[Sync] 正在启动 NeteaseCloudMusicApi...
-[NeteaseApi] 开始安装 NeteaseCloudMusicApi...
-[NeteaseApi] 获取最新版本信息...
-[NeteaseApi] 安装 Node.js 依赖...
-[成功] 安装完成!
-[Sync] API 服务器启动成功
+┌─────────────────────────────────────────────────────────┐
+│              网易云音乐进程 (cloudmusic.exe)              │
+│  ┌─────────────────────────────────────────────────┐    │
+│  │           cloudmusic.dll (内存空间)               │    │
+│  │  ┌─────────────────────────────────────────┐    │    │
+│  │  │   歌词数据 (Unicode 字符串)              │    │    │
+│  │  │   地址偏移: 0x01DF44D0 + 指针偏移        │    │    │
+│  │  └─────────────────────────────────────────┘    │    │
+│  └─────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────┘
+                          │
+                          │ ReadProcessMemory
+                          ▼
+┌─────────────────────────────────────────────────────────┐
+│              HaloLrcSync (本软件)                       │
+│  ┌──────────────────┐    ┌──────────────────────────┐  │
+│  │ cloudmusic_reader│───▶│   USB 发送到音箱          │  │
+│  │   内存读取器     │    │   显示歌词               │  │
+│  └──────────────────┘    └──────────────────────────┘  │
+└─────────────────────────────────────────────────────────┘
 ```
-
-### 2. 自动启动
-
-每次运行同步器时，会自动检查并启动 API 服务器。
-
-### 3. 手动管理
-
-如果需要手动管理 API 服务器，可以使用以下脚本：
-
-```bash
-# 查看 API 管理帮助
-python src/api_server.py --help
-
-# 输出:
-# options:
-#   --install    安装 NeteaseCloudMusicApi
-#   --start      启动 API 服务器
-#   --stop       停止 API 服务器
-#   --status     查看服务器状态
-#   --force      强制重新安装
-```
-
-### 4. API 服务器位置
-
-安装目录：`~/.halo_lrc_sync/NeteaseCloudMusicApi/`
-
-### 5. API 地址
-
-- **本地地址**: http://localhost:3000
-- **API文档**: http://localhost:3000/api.html
 
 ## 📁 项目结构
 
 ```
 HaloLrcSync/
 ├── src/
-│   ├── __init__.py         # 包信息
-│   ├── main.py             # 主程序入口
-│   ├── config.py           # 配置管理模块
-│   ├── netease_api.py      # 网易云音乐API客户端
-│   ├── api_server.py       # NeteaseCloudMusicApi管理器 ⭐新增
-│   ├── lrc_parser.py       # 歌词解析器
-│   └── usb_comm.py         # USB通信模块
-├── docs/                   # 文档目录
-├── resources/              # 资源文件
-├── requirements.txt        # 依赖列表
-├── run.bat                # Windows一键启动脚本
-└── README.md             # 本文件
+│   ├── __init__.py           # 包信息
+│   ├── main.py               # 主程序入口
+│   ├── config.py             # 配置管理
+│   ├── cloudmusic_reader.py  # 内存读取器 ⭐核心
+│   ├── lrc_parser.py         # 歌词解析器
+│   └── usb_comm.py           # USB通信模块
+├── docs/
+│   └── usb_protocol.md       # USB协议说明
+├── requirements.txt          # 依赖列表
+├── run.bat                   # Windows启动脚本
+└── README.md
 ```
+
+## 🔧 支持的网易云音乐版本
+
+| 版本 | 状态 |
+|------|------|
+| 3.1.30 | ✅ 支持 |
+| 3.1.29 | ✅ 支持 |
+| 3.1.28 | ✅ 支持 |
+| 3.1.27 | ✅ 支持 |
+| 3.1.26 | ✅ 支持 |
+| 3.1.25 | ✅ 支持 |
+
+> 📝 如果您的版本不在列表中，程序会尝试使用默认偏移，可能需要手动更新地址
 
 ## ⚙️ 配置说明
 
-程序首次运行时会创建配置文件：
-`C:\Users\你的用户名\.halo_lrc_sync\config.json`
-
-### 配置选项
+配置文件位于：`C:\Users\你的用户名\.halo_lrc_sync\config.json`
 
 ```json
 {
-  "netease": {
-    "host": "127.0.0.1",      // API服务器地址
-    "port": 3000,              // API服务器端口（默认3000）
-    "api_timeout": 5           // API超时时间（秒）
-  },
   "lyrics": {
-    "scroll_speed": 1,        // 滚动速度
-    "display_duration": 3,    // 显示时长（秒）
-    "scroll_duration": 0.5,   // 滚动动画时长（秒）
-    "sync_offset_ms": 0,      // 同步偏移（毫秒）
-    "max_chars_per_line": 20  // 每行最大字符数
+    "scroll_speed": 1,
+    "display_duration": 3,
+    "max_chars_per_line": 20
   },
   "usb": {
-    "device_id": "",          // 设备ID
-    "baud_rate": 9600,        // 波特率
-    "timeout": 2,             // 超时时间（秒）
-    "auto_detect": true       // 自动检测设备
-  },
-  "app": {
-    "log_level": "INFO",      // 日志级别
-    "cache_dir": "cache",     // 缓存目录
-    "auto_start": false,       // 开机启动
-    "minimize_to_tray": false  // 最小化到托盘
+    "device_id": "",
+    "baud_rate": 9600,
+    "auto_detect": true
   }
 }
 ```
 
-## 🔧 常见问题
+## ❓ 常见问题
 
-### Q: 提示"未找到 Node.js"？
+### Q: 提示"网易云音乐未运行"？
 
-A: 请先安装 Node.js
-- 下载地址: https://nodejs.org/
-- 推荐安装 LTS 版本
+A: 请确保：
+1. 网易云音乐已安装并运行
+2. 网易云音乐开启了桌面歌词功能
+3. 播放了一首歌曲
 
-### Q: API 服务器安装失败？
-
-A: 可以手动安装：
-```bash
-# 克隆仓库
-git clone https://github.com/Binaryify/NeteaseCloudMusicApi.git ~/.halo_lrc_sync/NeteaseCloudMusicApi
-
-# 进入目录
-cd ~/.halo_lrc_sync/NeteaseCloudMusicApi
-
-# 安装依赖
-npm install
-
-# 启动服务器
-node bin/www
-```
-
-### Q: API 服务器连接失败？
+### Q: 歌词读取不到？
 
 A: 检查以下几点：
-1. 服务器是否正在运行（运行 `--check-api` 查看状态）
-2. 端口是否被占用（默认 3000）
-3. 防火墙是否阻止连接
+1. 网易云音乐版本是否在支持列表中
+2. 是否开启了桌面歌词功能
+3. 程序是否以管理员权限运行（部分系统需要）
 
-### Q: 如何修改 API 服务器端口？
+### Q: 如何开启桌面歌词？
 
-A: 修改配置文件中的 `netease.port` 为其他端口（如 8080）
+A: 在网易云音乐中：
+- 右键歌曲播放界面
+- 选择"桌面歌词"选项
 
-### Q: 找不到设备怎么办？
+### Q: 程序需要管理员权限吗？
 
-A: 运行 `--list-devices` 查看可用设备，然后使用 `--port` 参数指定
+A: 内存读取需要足够的进程访问权限。如果遇到权限问题，请尝试以管理员身份运行。
 
-### Q: 歌词不同步？
+## 🔧 开发说明
 
-A: 调整 `sync_offset_ms` 参数，正值延迟显示，负值提前显示
+### 内存地址更新
 
-## 📝 开发说明
+如果网易云音乐更新后地址变化，可以更新 `cloudmusic_reader.py` 中的 `VERSION_ADDRESS_MAP`：
 
-### 添加新的音乐源
-
-1. 创建新的 API 类继承基础类
-2. 实现 `get_current_play_status()` 和 `get_lyrics()` 方法
-3. 修改配置支持新的音乐源
-
-### 自定义USB协议
-
-修改 `src/usb_comm.py` 中的 `send_text()` 方法
-
-### 测试
-
-```bash
-pip install pytest
-pytest tests/
+```python
+VERSION_ADDRESS_MAP = {
+    "3.1.31": (0x新的基地址, 偏移1, 偏移2, ...),
+}
 ```
+
+### 添加新版本支持
+
+参考 [HaloPixelToolBox](https://github.com/XFEstudio/HaloPixelToolBox) 项目获取最新的内存地址。
+
+## 📚 参考项目
+
+- [HaloPixelToolBox](https://github.com/XFEstudio/HaloPixelToolBox) - C# 实现的歌词同步工具
+- [NeteaseCloudMusicApi](https://github.com/Binaryify/NeteaseCloudMusicApi) - 网易云音乐API
 
 ## 🤝 贡献
 
@@ -258,7 +197,7 @@ pytest tests/
 
 ## 📄 许可证
 
-MIT License - 详见 LICENSE 文件
+MIT License
 
 ## ⚠️ 免责声明
 
