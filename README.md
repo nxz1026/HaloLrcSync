@@ -2,7 +2,7 @@
 
 通过内存读取方式获取网易云音乐歌词，同步显示到 HALO OIXELBAR 音箱。
 
-> 核心技术：内存读取 + HID协议，与官方工具 HaloPixelToolBox 完全一致
+> 核心技术：内存读取 + HID协议，与工具 HaloPixelToolBox 完全一致
 
 ## 功能特点
 
