@@ -39,7 +39,7 @@ class LyricSynchronizer:
         self.last_lyric_index = -1
         self.last_lyrics_text = ""
         self.scroll_mode = False
-        self._lock = threading.Lock()
+        self.clock_mode = False
     
     def start(self):
         """启动同步器"""
@@ -104,6 +104,11 @@ class LyricSynchronizer:
                 if lyrics and lyrics != self.last_lyrics_text:
                     self.last_lyrics_text = lyrics
                     no_lyrics_count = 0
+                    
+                    if self.clock_mode:
+                        self.clock_mode = False
+                        self.scroll_mode = False
+                        print("[Sync] 恢复歌词显示模式")
                     
                     if show_startup:
                         print(f"\n{'='*60}")
@@ -187,10 +192,13 @@ class LyricSynchronizer:
     
     def _switch_to_clock_ui(self):
         """切换到时钟UI模式"""
+        if self.clock_mode:
+            return
         try:
             self.hid.set_ui_mode(UIModel.CLOCK)
             self.hid.set_text_layout(TextLayout.CENTER)
             self.scroll_mode = False
+            self.clock_mode = True
             print("[Sync] 切换到时钟UI模式")
         except Exception as e:
             print(f"[Sync] 切换UI模式失败: {e}")

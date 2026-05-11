@@ -115,13 +115,10 @@ class HaloPixelCommunicator:
             return devices
         
         try:
-            # 枚举所有HID设备
             enumerated = hidapi.hid.enumerate()
             
             for dev in enumerated:
-                # 获取设备属性（hidapi返回对象而非字典）
                 def get_attr(obj, name):
-                    """安全获取对象属性"""
                     for attr in [name, name.replace('_', ''), name.replace('_string', '')]:
                         if hasattr(obj, attr):
                             val = getattr(obj, attr)
@@ -131,12 +128,12 @@ class HaloPixelCommunicator:
                 
                 info = HidDeviceInfo(
                     path=get_attr(dev, "path"),
-                    vendor_id=get_attr(dev, "vendor_id") or 0,
-                    product_id=get_attr(dev, "product_id") or 0,
+                    vendor_id=int(get_attr(dev, "vendor_id") or "0"),
+                    product_id=int(get_attr(dev, "product_id") or "0"),
                     serial_number=get_attr(dev, "serial_number"),
                     manufacturer_string=get_attr(dev, "manufacturer_string"),
                     product_string=get_attr(dev, "product_string"),
-                    release_number=int(get_attr(dev, "release_number") or "0") or 0
+                    release_number=int(get_attr(dev, "release_number") or "0")
                 )
                 devices.append(info)
                 

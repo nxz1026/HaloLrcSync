@@ -144,7 +144,9 @@ HaloLrcSync/
 | 3.1.26 | ✅ 支持 |
 | 3.1.25 | ✅ 支持 |
 
-> 💡 网易云音乐更新后如无法使用，请参考 `docs/address_guide.md` 查找新的内存地址偏移
+> 💡 网易云音乐更新后如无法使用：
+> - 使用 `docs/address_scanner.py` 自动扫描新地址
+> - 或参考 `docs/address_guide.md` 手动查找偏移
 
 ## 配置
 
